@@ -142,6 +142,16 @@ exe собирается автоматически на GitHub Actions из и�
 | Виджеты пропали | Ищите иконку в трее → левый клик |
 | Первый запуск exe «думает» 5–15 секунд | Нормально для onefile-упаковки — распаковывается в память |
 
+## 💝 Поддержать проект / Say Thanks
+
+PixelDesk — бесплатный проект с открытым исходным кодом.
+Если приложение вам понравилось, можно сказать спасибо:
+
+[![Support](https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F-Support-9ece6a)](https://github.com/artur0vi4/PixelDesk/blob/main/docs/EN/Funding.md)
+
+- 🇷🇺 Сказать спасибо: [docs/RU/Funding.md](docs/RU/Funding.md)
+- 🇬🇧 Say thanks: [docs/EN/Funding.md](docs/EN/Funding.md)
+
 ## Авторство
 
 - **Автор и разработчик:** Artur ([artur0vi4](https://github.com/artur0vi4))
