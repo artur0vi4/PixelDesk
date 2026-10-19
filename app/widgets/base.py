@@ -17,6 +17,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import QApplication, QFrame, QMenu
 
 from .. import config, theme
+from .. import i18n
 
 FONT_FAMILY = "Segoe UI" if os.name == "nt" else None
 
@@ -39,7 +40,7 @@ class PixelWidget(QFrame):
         self.cfg = app_cfg["widgets"][key]
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
-        self.setWindowTitle(self.TITLE)
+        self.setWindowTitle(i18n.t(self.TITLE))
         self.setMinimumSize(150, 80)
         self._apply_window_flags()
         self.resize(int(self.cfg["w"]), int(self.cfg["h"]))
@@ -96,8 +97,12 @@ class PixelWidget(QFrame):
 
     def set_on_top(self, on: bool) -> None:
         self.cfg["on_top"] = bool(on)
+        # ВАЖНО: смена флагов скрывает видимое окно, поэтому видимость
+        # запоминаем ДО _apply_window_flags(), иначе show() не вызовется
+        # и виджет «исчезнет» (баг 1.1.x).
+        was_visible = self.isVisible()
         self._apply_window_flags()
-        if self.isVisible():
+        if was_visible:
             self.show()
         self.persist()
         self.update()
@@ -198,28 +203,28 @@ class PixelWidget(QFrame):
         a_ver.setEnabled(False)
         menu.addSeparator()
 
-        a_top = menu.addAction(self._ck(bool(self.cfg.get("on_top", True)), "Поверх всех окон"))
+        a_top = menu.addAction(self._ck(bool(self.cfg.get("on_top", True)), i18n.t("on_top")))
         a_top.setData("top")
 
-        m_op = menu.addMenu("Прозрачность")
+        m_op = menu.addMenu(i18n.t("opacity"))
         for pct in OPACITY_PRESETS:
             on = abs(float(self.cfg.get("opacity", 0.96)) * 100 - pct) < 3
             act = m_op.addAction(self._ck(on, f"{pct}%"))
             act.setData(("op", pct))
 
-        m_sc = menu.addMenu("Масштаб")
+        m_sc = menu.addMenu(i18n.t("zoom"))
         for pct in SCALE_PRESETS:
             on = abs(self.s * 100 - pct) < 4
             act = m_sc.addAction(self._ck(on, f"{pct}%"))
             act.setData(("sc", pct))
 
         if self.HAS_REFRESH:
-            a_ref = menu.addAction("Обновить")
+            a_ref = menu.addAction(i18n.t("refresh"))
             a_ref.setData("refresh")
 
         self.extra_menu(menu)
         menu.addSeparator()
-        a_hide = menu.addAction("Скрыть виджет")
+        a_hide = menu.addAction(i18n.t("hide_widget"))
         a_hide.setData("hide")
         return menu
 

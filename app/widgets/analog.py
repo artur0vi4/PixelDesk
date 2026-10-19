@@ -18,7 +18,7 @@ from .. import theme
 
 
 class AnalogClockWidget(PixelWidget):
-    TITLE = "Аналоговые часы"
+    TITLE = "w_clock_analog"
 
     def __init__(self, app_cfg: dict):
         super().__init__(app_cfg, "clock_analog")

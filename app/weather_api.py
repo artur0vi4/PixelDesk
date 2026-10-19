@@ -16,42 +16,42 @@ import math
 
 import requests
 
+from . import i18n
+
 UA = {"User-Agent": "PixelDesk/1.1 (desktop widgets; github.com/artur0vi4)"}
 GEO_TIMEOUT = 8
 WX_TIMEOUT = 10
 
-WD_SHORT = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
-
-# WMO weather interpretation codes -> (описание, иконка днём, иконка ночью)
+# WMO weather interpretation codes -> (описание RU, описание EN, иконка днём, иконка ночью)
 _WMO = {
-    0: ("Ясно", "☀️", "🌙"),
-    1: ("Преимущественно ясно", "🌤️", "🌙"),
-    2: ("Переменная облачность", "⛅", "☁️"),
-    3: ("Пасмурно", "☁️", "☁️"),
-    45: ("Туман", "🌫️", "🌫️"),
-    48: ("Изморозь", "🌫️", "🌫️"),
-    51: ("Слабая морось", "🌦️", "🌧️"),
-    53: ("Морось", "🌦️", "🌧️"),
-    55: ("Сильная морось", "🌧️", "🌧️"),
-    56: ("Ледяная морось", "🌧️", "🌧️"),
-    57: ("Ледяная морось", "🌧️", "🌧️"),
-    61: ("Небольшой дождь", "🌦️", "🌧️"),
-    63: ("Дождь", "🌧️", "🌧️"),
-    65: ("Сильный дождь", "🌧️", "🌧️"),
-    66: ("Ледяной дождь", "🌧️", "🌧️"),
-    67: ("Ледяной дождь", "🌧️", "🌧️"),
-    71: ("Небольшой снег", "🌨️", "🌨️"),
-    73: ("Снег", "🌨️", "🌨️"),
-    75: ("Сильный снег", "❄️", "❄️"),
-    77: ("Снежные зёрна", "🌨️", "🌨️"),
-    80: ("Ливень", "🌧️", "🌧️"),
-    81: ("Ливень", "🌧️", "🌧️"),
-    82: ("Сильный ливень", "⛈️", "⛈️"),
-    85: ("Снегопад", "🌨️", "🌨️"),
-    86: ("Сильный снегопад", "❄️", "❄️"),
-    95: ("Гроза", "⛈️", "⛈️"),
-    96: ("Гроза с градом", "⛈️", "⛈️"),
-    99: ("Гроза с градом", "⛈️", "⛈️"),
+    0: ("Ясно", "Clear sky", "☀️", "🌙"),
+    1: ("Преимущественно ясно", "Mainly clear", "🌤️", "🌙"),
+    2: ("Переменная облачность", "Partly cloudy", "⛅", "☁️"),
+    3: ("Пасмурно", "Overcast", "☁️", "☁️"),
+    45: ("Туман", "Fog", "🌫️", "🌫️"),
+    48: ("Изморозь", "Rime fog", "🌫️", "🌫️"),
+    51: ("Слабая морось", "Light drizzle", "🌦️", "🌧️"),
+    53: ("Морось", "Drizzle", "🌦️", "🌧️"),
+    55: ("Сильная морось", "Dense drizzle", "🌧️", "🌧️"),
+    56: ("Ледяная морось", "Freezing drizzle", "🌧️", "🌧️"),
+    57: ("Ледяная морось", "Freezing drizzle", "🌧️", "🌧️"),
+    61: ("Небольшой дождь", "Slight rain", "🌦️", "🌧️"),
+    63: ("Дождь", "Rain", "🌧️", "🌧️"),
+    65: ("Сильный дождь", "Heavy rain", "🌧️", "🌧️"),
+    66: ("Ледяной дождь", "Freezing rain", "🌧️", "🌧️"),
+    67: ("Ледяной дождь", "Freezing rain", "🌧️", "🌧️"),
+    71: ("Небольшой снег", "Slight snowfall", "🌨️", "🌨️"),
+    73: ("Снег", "Snowfall", "🌨️", "🌨️"),
+    75: ("Сильный снег", "Heavy snowfall", "❄️", "❄️"),
+    77: ("Снежные зёрна", "Snow grains", "🌨️", "🌨️"),
+    80: ("Ливень", "Rain showers", "🌧️", "🌧️"),
+    81: ("Ливень", "Rain showers", "🌧️", "🌧️"),
+    82: ("Сильный ливень", "Violent showers", "⛈️", "⛈️"),
+    85: ("Снегопад", "Snow showers", "🌨️", "🌨️"),
+    86: ("Сильный снегопад", "Heavy snow showers", "❄️", "❄️"),
+    95: ("Гроза", "Thunderstorm", "⛈️", "⛈️"),
+    96: ("Гроза с градом", "Thunderstorm with hail", "⛈️", "⛈️"),
+    99: ("Гроза с градом", "Thunderstorm with hail", "⛈️", "⛈️"),
 }
 
 # Яндекс condition -> код WMO
@@ -70,9 +70,11 @@ _YANDEX_DIR = {"n": 0, "ne": 45, "e": 90, "se": 135, "s": 180,
 
 
 def wmo(code: int, is_day: bool = True):
-    """(текст, эмодзи) по коду WMO."""
-    t = _WMO.get(int(code or 0), ("Облачно", "☁️", "☁️"))
-    return t[0], (t[1] if is_day else t[2])
+    """(текст, эмодзи) по коду WMO; текст на текущем языке."""
+    default = ("Облачно", "Cloudy", "☁️", "☁️")
+    t = _WMO.get(int(code or 0), default)
+    txt = t[0] if i18n.current() == "ru" else t[1]
+    return txt, (t[2] if is_day else t[3])
 
 
 def wind_dir(deg) -> str:
@@ -80,7 +82,7 @@ def wind_dir(deg) -> str:
         i = int(round(float(deg) / 45.0)) % 8
     except Exception:
         return ""
-    return ("С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ")[i]
+    return i18n.wind_dir_name(i)
 
 
 def met_symbol_to_wmo(sym: str) -> int:
@@ -272,7 +274,7 @@ def _fetch_open_meteo(lat: float, lon: float) -> dict:
     for i in range(min(5, len(daily["time"]))):
         d = dt.date.fromisoformat(daily["time"][i])
         days.append({
-            "label": f"{WD_SHORT[d.weekday()]} {d.day:02d}",
+            "label": f"{i18n.wd_short(d.weekday())} {d.day:02d}",
             "code": int(daily["weather_code"][i] or 0),
             "min": round(daily["temperature_2m_min"][i]),
             "max": round(daily["temperature_2m_max"][i]),
@@ -392,7 +394,7 @@ def _fetch_met(lat: float, lon: float) -> dict:
         mid = min(rows, key=lambda r: abs(r[0] - 13))
         code = met_symbol_to_wmo(mid[2] if mid[2] else rows[len(rows) // 2][2])
         days.append({
-            "label": f"{WD_SHORT[day.weekday()]} {day.day:02d}",
+            "label": f"{i18n.wd_short(day.weekday())} {day.day:02d}",
             "code": code,
             "min": round(min(temps)),
             "max": round(max(temps)),
@@ -487,7 +489,7 @@ def _fetch_yandex(lat: float, lon: float, key: str) -> dict:
         day = dt.date.fromisoformat(f.get("date") or now_local.date().isoformat())
         pop = (parts.get("day") or {}).get("prec_prob") or ds.get("prec_prob") or 0
         days.append({
-            "label": f"{WD_SHORT[day.weekday()]} {day.day:02d}",
+            "label": f"{i18n.wd_short(day.weekday())} {day.day:02d}",
             "code": _YANDEX_WMO.get(ds.get("condition"), 3),
             "min": round(float(ns.get("temp", ds.get("temp", 0)))),
             "max": round(float(ds.get("temp", 0))),
@@ -532,7 +534,7 @@ def fetch_forecast(lat: float, lon: float,
         chain = ("open-meteo", "met", "yandex") if key else ("open-meteo", "met")
 
     names = {"open-meteo": "Open-Meteo", "met": "MET Norway (yr.no)",
-             "yandex": "Яндекс Погода"}
+             "yandex": i18n.t("wx_yandex_name")}
     last_err: Exception | None = None
     for name in chain:
         try:
@@ -565,7 +567,7 @@ def fake_forecast() -> dict:
     days = []
     for i in range(5):
         d = dt.date.today() + dt.timedelta(days=i)
-        days.append({"label": f"{WD_SHORT[d.weekday()]} {d.day:02d}",
+        days.append({"label": f"{i18n.wd_short(d.weekday())} {d.day:02d}",
                      "code": codes_d[i], "min": 2 + i % 3,
                      "max": 8 + (i * 3) % 7, "pop": pops_d[i]})
     return {
@@ -574,5 +576,5 @@ def fake_forecast() -> dict:
         "hours": hours, "days": days,
         "sunrise": "07:42", "sunset": "16:58", "uv": 1.4,
         "now_local": now.strftime("%H:%M"),
-        "source": "Демо",
+        "source": i18n.t("demo"),
     }

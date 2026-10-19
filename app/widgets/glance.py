@@ -8,28 +8,24 @@ from PySide6.QtGui import QFont, QFontMetrics, QPainter
 
 from .base import PixelWidget
 from .. import theme
-
-WEEKDAYS = ("Понедельник", "Вторник", "Среда", "Четверг",
-            "Пятница", "Суббота", "Воскресенье")
-MONTHS_GEN = ("января", "февраля", "марта", "апреля", "мая", "июня",
-              "июля", "августа", "сентября", "октября", "ноября", "декабря")
+from .. import i18n
 
 GAP = 0.12          # зазор между строками в долях кегля строки 1
 LINE2_RATIO = 0.50  # кегль приветствия относительно строки 1
 
+_GREET_KEYS = ((5, 12, "greet_morning"), (12, 18, "greet_day"),
+               (18, 23, "greet_evening"))
+
 
 def greeting(hour: int) -> str:
-    if 5 <= hour < 12:
-        return "Доброе утро"
-    if 12 <= hour < 18:
-        return "Добрый день"
-    if 18 <= hour < 23:
-        return "Добрый вечер"
-    return "Доброй ночи"
+    for lo, hi, key in _GREET_KEYS:
+        if lo <= hour < hi:
+            return i18n.t(key)
+    return i18n.t("greet_night")
 
 
 class DateWidget(PixelWidget):
-    TITLE = "Дата"
+    TITLE = "w_date"
 
     def __init__(self, app_cfg: dict):
         super().__init__(app_cfg, "date")
@@ -44,7 +40,7 @@ class DateWidget(PixelWidget):
         area = QRectF(self.rect()).adjusted(
             self.pad(), self.pad(), -self.pad(), -self.pad())
 
-        line1 = f"{WEEKDAYS[now.weekday()]}, {now.day} {MONTHS_GEN[now.month - 1]}"
+        line1 = i18n.date_line(now.weekday(), now.day, now.month - 1)
 
         # Кегль считается ТОЧНО по измеренным метрикам активного шрифта.
         # ВАЖНО: метрики можно сравнивать только с фиксированным бюджетом —

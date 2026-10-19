@@ -9,9 +9,16 @@ Windows 10/11. Часы, дата, календарь, погода и мони�
 рабочем столе полупрозрачными карточками: их можно перетаскивать, растягивать,
 менять масштаб и прозрачность. Программа живёт в трее и не загромождает панель задач.
 
+> **EN:** PixelDesk is a set of **Google Pixel (Material You) style** desktop
+> widgets for Windows 10/11 — clock, analog clock, date, calendar, weather
+> and a system monitor. Free, open-source, portable exe (no Python needed).
+> Interface is available in **Russian and English**, detected automatically.
+
 - Автор: **Artur (artur0vi4)** → [github.com/artur0vi4](https://github.com/artur0vi4)
 - Лицензия: MIT
 - Платформа: Windows 10/11 (на Linux/macOS запускается в урезанном виде)
+- Язык интерфейса: **русский / English** — определяется по системе автоматически,
+  переключается в трее: **Язык / Language → Русский / English / Авто**
 
 ## Виджеты
 

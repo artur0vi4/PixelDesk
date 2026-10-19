@@ -8,12 +8,13 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 
 from .base import PixelWidget
 from .. import theme
+from .. import i18n
 
 HIST = 60  # точек на графике (секунд)
 
 
 class SystemWidget(PixelWidget):
-    TITLE = "Загрузка системы"
+    TITLE = "w_system"
     disabled = Signal(str)
 
     def __init__(self, app_cfg: dict, monitor):
@@ -116,13 +117,14 @@ class SystemWidget(PixelWidget):
         net_vmax *= 1.25
 
         rows = [
-            ("Процессор", cpu_txt, self.cpu,
+            (i18n.t("lbl_cpu"), cpu_txt, self.cpu,
              theme.C("primary"), 100.0, False),
-            ("Память", f"{self._last['ram']:.0f}%", self.ram,
+            (i18n.t("lbl_ram"), f"{self._last['ram']:.0f}%", self.ram,
              theme.C("tertiary"), 100.0, False),
-            ("Видеокарта", gpu_txt, self.gpu_hist,
+            (i18n.t("lbl_gpu"), gpu_txt, self.gpu_hist,
              theme.C("secondary"), 100.0, False),
-            ("Сеть ↓↑", f"{self._fmt_speed(down)} · {self._fmt_speed(up)} Мбит/с",
+            (i18n.t("lbl_net"),
+             f"{self._fmt_speed(down)} · {self._fmt_speed(up)} {i18n.t('unit_mbit')}",
              self.down, theme.C("primary"), net_vmax, True),
         ]
 

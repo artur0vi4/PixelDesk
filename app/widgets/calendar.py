@@ -15,10 +15,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 
 from .base import PixelWidget
 from .. import theme
-
-WD_SHORT = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
-MONTHS_NOM = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-              "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
+from .. import i18n
 
 # Нерабочие праздничные дни РФ (ТК РФ ст. 112), (месяц, день).
 # 1–8 января включают Рождество 7 января.
@@ -45,7 +42,7 @@ def _add_months(d: date, n: int) -> date:
 
 
 class CalendarWidget(PixelWidget):
-    TITLE = "Календарь"
+    TITLE = "w_calendar"
 
     def __init__(self, app_cfg: dict):
         super().__init__(app_cfg, "calendar")
@@ -82,7 +79,7 @@ class CalendarWidget(PixelWidget):
         title_h = 30.0 * self.s
 
         # --- заголовок «Октябрь 2026» + стрелки ---
-        title = f"{MONTHS_NOM[self._month.month - 1]} {self._month.year}"
+        title = f"{i18n.month_nom(self._month.month - 1)} {self._month.year}"
         title_w = area.width() - 2.4 * zone
         f_title = self.f(title_h * 0.96, QFont.Bold)
         while f_title.pixelSize() > 9 and (
@@ -107,7 +104,8 @@ class CalendarWidget(PixelWidget):
         header_h = 20.0 * self.s
         cell_w = area.width() / 7.0
         f_head = self.f(11 * self.s, QFont.DemiBold)
-        for i, wd in enumerate(WD_SHORT):
+        for i in range(7):
+            wd = i18n.wd_short(i)
             color = theme.C("error") if i >= 5 else theme.C("on_surface_variant")
             self._text(p, QRectF(area.left() + i * cell_w, wy, cell_w, header_h),
                        Qt.AlignCenter, wd, color, f_head)
@@ -198,7 +196,7 @@ class CalendarWidget(PixelWidget):
         return None
 
     def extra_menu(self, menu) -> None:
-        act = menu.addAction("К текущему месяцу")
+        act = menu.addAction(i18n.t("cal_today"))
         act.setData("today")
 
     def handle_menu_data(self, data) -> bool:

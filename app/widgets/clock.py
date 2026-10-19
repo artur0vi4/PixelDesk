@@ -11,7 +11,7 @@ from .. import theme
 
 
 class ClockWidget(PixelWidget):
-    TITLE = "Часы"
+    TITLE = "w_clock"
 
     def __init__(self, app_cfg: dict):
         super().__init__(app_cfg, "clock")

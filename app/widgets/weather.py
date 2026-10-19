@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QInputDialog
 
 from .base import PixelWidget
 from .. import config, theme
+from .. import i18n
 from .. import weather_api
 
 
@@ -19,14 +20,14 @@ class _Sig(QObject):
 
 
 class WeatherWidget(PixelWidget):
-    TITLE = "Погода"
+    TITLE = "w_weather"
     HAS_REFRESH = True
 
     def __init__(self, app_cfg: dict):
         super().__init__(app_cfg, "weather")
         self.setMinimumSize(280, 430)
         self.data: dict | None = None
-        self.status = "Определение местоположения…"
+        self.status = i18n.t("wx_locating")
         self._last_ok: str | None = None   # время последних удачных данных
         self._sig = _Sig()
         self._sig.got.connect(self._on_data)
@@ -45,7 +46,7 @@ class WeatherWidget(PixelWidget):
     #  Загрузка данных в фоновом потоке
     # ------------------------------------------------------------------ #
     def refresh(self) -> None:
-        self.status = "Обновление…"
+        self.status = i18n.t("wx_updating")
         self.update()
         threading.Thread(target=self._work, daemon=True).start()
 
@@ -63,7 +64,7 @@ class WeatherWidget(PixelWidget):
             if wc.get("lat") is None or wc.get("lon") is None:
                 geo = weather_api.ip_geo()
                 if geo is None:
-                    geo = {"city": "Москва", "lat": 55.7558,
+                    geo = {"city": i18n.t("city_moscow"), "lat": 55.7558,
                            "lon": 37.6173, "fallback": True}
             else:
                 geo = {"city": wc.get("city") or "—",
@@ -85,11 +86,11 @@ class WeatherWidget(PixelWidget):
                 wc.update(city=geo["city"], lat=geo["lat"], lon=geo["lon"],
                           manual=True)
                 config.save(self.app_cfg)
-                self.status = f"Город: {geo['city']} — обновление…"
+                self.status = i18n.t("wx_city_updating", city=geo["city"])
                 self.update()
                 self.refresh()
             else:
-                self.status = f"Город «{payload.get('query', '')}» не найден"
+                self.status = i18n.t("wx_city_not_found", q=payload.get("query", ""))
                 self.update()
             return
         if payload.get("ok"):
@@ -97,29 +98,30 @@ class WeatherWidget(PixelWidget):
             geo = self.data["geo"]
             if not (wc.get("manual") and wc.get("lat") is not None):
                 wc["city"], wc["lat"], wc["lon"] = geo["city"], geo["lat"], geo["lon"]
-            note = " (город по умолчанию)" if geo.get("fallback") else ""
+            note = i18n.t("wx_default_city") if geo.get("fallback") else ""
             src = self.data.get("source")
             self._last_ok = datetime.now().strftime("%H:%M")
-            self.status = f"Обновлено в {self._last_ok} · {src}" + note
+            self.status = i18n.t("wx_updated", time=self._last_ok, src=src) + note
         else:
-            self.status = "Нет сети"
+            self.status = i18n.t("wx_offline")
             if self._last_ok:
-                self.status += f" — данные от {self._last_ok}"
+                self.status += " — " + i18n.t("wx_data_from", time=self._last_ok)
             elif self.data:
-                self.status += f" — данные от {self.data.get('now_local', '?')}"
+                self.status += " — " + i18n.t(
+                    "wx_data_from", time=self.data.get("now_local", "?"))
         self.update()
         config.save(self.app_cfg)
 
     def change_city(self) -> None:
         cur = self.app_cfg["weather"].get("city") or ""
-        text, ok = QInputDialog.getText(self, "Сменить город",
-                                        "Название города:", text=cur)
+        text, ok = QInputDialog.getText(self, i18n.t("wx_change_city_title"),
+                                        i18n.t("wx_city_prompt"), text=cur)
         if not ok:
             return
         q = text.strip()
         if not q:
             return
-        self.status = f"Поиск: {q}…"
+        self.status = i18n.t("wx_searching", q=q)
         self.update()
 
         def job():
@@ -132,32 +134,32 @@ class WeatherWidget(PixelWidget):
     def set_yandex_key(self) -> None:
         cur = self.app_cfg["weather"].get("yandex_key") or ""
         text, ok = QInputDialog.getText(
-            self, "Ключ Яндекс Погоды",
-            "Ключ (бесплатный: yandex.ru/dev/weather, 50 зап./день):",
+            self, i18n.t("wx_key_title"),
+            i18n.t("wx_key_prompt"),
             text=cur)
         if not ok:
             return
         self.app_cfg["weather"]["yandex_key"] = text.strip() or None
         config.save(self.app_cfg)
-        self.status = ("Ключ сохранён — обновление…"
-                       if text.strip() else "Ключ удалён — обновление…")
+        self.status = (i18n.t("wx_key_saved")
+                       if text.strip() else i18n.t("wx_key_removed"))
         self.update()
         self.refresh()
 
     # ------------------------------------------------------------------ #
     def extra_menu(self, menu) -> None:
-        a_city = menu.addAction("Сменить город…")
+        a_city = menu.addAction(i18n.t("wx_change_city"))
         a_city.setData("city")
 
-        m_src = menu.addMenu("Источник погоды")
+        m_src = menu.addMenu(i18n.t("wx_source"))
         cur_src = self.app_cfg["weather"].get("source") or "auto"
-        for val, name in (("auto", "Авто (с резервами)"),
+        for val, name in (("auto", i18n.t("wx_src_auto")),
                           ("open-meteo", "Open-Meteo"),
-                          ("yandex", "Яндекс Погода")):
+                          ("yandex", i18n.t("wx_src_yandex"))):
             act = m_src.addAction(self._ck(cur_src == val, name))
             act.setData(("src", val))
 
-        a_key = menu.addAction("Ключ Яндекс Погоды…")
+        a_key = menu.addAction(i18n.t("wx_key_menu"))
         a_key.setData("ykey")
 
     def handle_menu_data(self, data) -> bool:
@@ -170,7 +172,7 @@ class WeatherWidget(PixelWidget):
         if isinstance(data, tuple) and data and data[0] == "src":
             self.app_cfg["weather"]["source"] = data[1]
             config.save(self.app_cfg)
-            self.status = "Источник изменён — обновление…"
+            self.status = i18n.t("wx_src_changed")
             self.update()
             self.refresh()
             return True
@@ -187,7 +189,7 @@ class WeatherWidget(PixelWidget):
         outline.setAlpha(70)
 
         if not self.data:
-            self._text(p, area, Qt.AlignCenter, self.status or "Загрузка…",
+            self._text(p, area, Qt.AlignCenter, self.status or i18n.t("wx_loading"),
                        theme.C("on_surface_variant"), self.f(15 * s))
             return
 
@@ -237,12 +239,13 @@ class WeatherWidget(PixelWidget):
 
         # ---- сетка деталей 3 x 2 ----
         details = [
-            ("Ощущается", f"{cur['feels']}°"),
-            ("Ветер", f"{cur['wind']} м/с {weather_api.wind_dir(cur['wdir'])}".strip()),
-            ("Влажность", f"{cur['hum']}%" if cur["hum"] is not None else "—"),
-            ("Давление", f"{cur['pres']} мм"),
-            ("УФ-индекс", str(d["uv"]) if d["uv"] is not None else "—"),
-            ("Облачность", f"{cur['cloud']}%" if cur["cloud"] is not None else "—"),
+            (i18n.t("lbl_feels"), f"{cur['feels']}°"),
+            (i18n.t("lbl_wind"),
+             f"{cur['wind']} {i18n.t('unit_ms')} {weather_api.wind_dir(cur['wdir'])}".strip()),
+            (i18n.t("lbl_hum"), f"{cur['hum']}%" if cur["hum"] is not None else "—"),
+            (i18n.t("lbl_pres"), f"{cur['pres']} {i18n.t('unit_mm')}"),
+            (i18n.t("lbl_uv"), str(d["uv"]) if d["uv"] is not None else "—"),
+            (i18n.t("lbl_cloud"), f"{cur['cloud']}%" if cur["cloud"] is not None else "—"),
         ]
         col_w = area.width() / 3.0
         row_h = 38 * s

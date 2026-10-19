@@ -17,7 +17,7 @@ from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPen
 from PySide6.QtWidgets import (QApplication, QMenu, QMessageBox,
                                QSystemTrayIcon)
 
-from app import autostart, config, theme
+from app import autostart, config, i18n, theme
 from app.sysinfo import SystemMonitor
 from app.widgets import base as widgets_base
 from app.widgets.analog import AnalogClockWidget
@@ -37,12 +37,12 @@ WIDGET_CLASSES = {
     "weather": WeatherWidget,
 }
 WIDGET_TITLES = {
-    "clock": "Часы",
-    "clock_analog": "Аналоговые часы",
-    "date": "Дата и день недели",
-    "calendar": "Календарь",
-    "weather": "Погода",
-    "system": "Загрузка системы",
+    "clock": "w_clock",
+    "clock_analog": "w_clock_analog",
+    "date": "w_date",
+    "calendar": "w_calendar",
+    "weather": "w_weather",
+    "system": "w_system",
 }
 
 
@@ -294,7 +294,7 @@ def build_tray(app: QApplication, manager: WidgetManager) -> QSystemTrayIcon:
             config.save(manager.cfg)
         else:
             QMessageBox.information(None, config.APP_NAME,
-                                    "Автозапуск доступен только в Windows.")
+                                    i18n.t("autostart_win_only"))
 
     def refresh_weather() -> None:
         w = manager.widgets.get("weather")
@@ -303,53 +303,72 @@ def build_tray(app: QApplication, manager: WidgetManager) -> QSystemTrayIcon:
 
     def show_about() -> None:
         QMessageBox.about(
-            None, f"О {config.APP_NAME}",
-            f"<h3>{config.APP_NAME} {config.APP_VERSION}</h3>"
-            "<p>Виджеты рабочего стола в стиле Material You (Google Pixel) "
-            "для Windows: часы, дата, календарь, погода и монитор системы.</p>"
-            f"<p>Автор: <b>{config.APP_AUTHOR}</b><br>"
-            f"GitHub: {config.APP_URL}</p>"
-            "<p>Лицензия MIT &middot; 2026</p>")
+            None, i18n.t("about_title", name=config.APP_NAME),
+            i18n.t("about_body", name=config.APP_NAME,
+                   ver=config.APP_VERSION, author=config.APP_AUTHOR,
+                   url=config.APP_URL))
+
+    def set_language(val: str) -> None:
+        manager.cfg.setdefault("ui", {})["lang"] = val
+        config.save(manager.cfg)
+        i18n.init(val)
+        # заголовки окон + перерисовка (даты, месяцы, подписи)
+        for w in manager.widgets.values():
+            w.setWindowTitle(i18n.t(w.TITLE))
+            w.update()
+        wx = manager.widgets.get("weather")
+        if wx is not None:
+            wx.refresh()   # подписи дней «запечены» в данных
 
     def rebuild() -> None:
         menu.clear()
         hidden = bool(manager.cfg.get("hidden_all"))
         a_vis = menu.addAction(
             ("✓  " if not hidden else "") +
-            ("Скрыть все виджеты" if not hidden else "Показать все виджеты"))
+            i18n.t("show_all" if hidden else "hide_all"))
         a_vis.triggered.connect(lambda: manager.set_all_hidden(not hidden))
 
-        m_w = menu.addMenu("Виджеты")
+        m_w = menu.addMenu(i18n.t("m_widgets"))
         for k in WIDGET_ORDER:
             on = k in manager.widgets
-            act = m_w.addAction(("✓  " if on else "     ") + WIDGET_TITLES[k])
+            act = m_w.addAction(("✓  " if on else "     ")
+                                + i18n.t(WIDGET_TITLES[k]))
             act.triggered.connect(
                 lambda checked, key=k: manager.enable_widget(key, key not in manager.widgets))
 
         menu.addSeparator()
-        m_t = menu.addMenu("Тема")
+        m_t = menu.addMenu(i18n.t("m_theme"))
         for pid, pal in theme.PALETTES.items():
             on = manager.cfg["theme"].get("palette") == pid
-            act = m_t.addAction(("✓  " if on else "     ") + pal["name"])
+            act = m_t.addAction(("✓  " if on else "     ")
+                                + i18n.t(i18n.PAL_KEYS.get(pid, pid)))
             act.triggered.connect(lambda checked, p=pid: set_palette(p))
         m_t.addSeparator()
-        for dark, label in ((True, "Тёмная"), (False, "Светлая")):
+        for dark, label in ((True, "th_dark"), (False, "th_light")):
             on = bool(manager.cfg["theme"].get("dark", True)) == dark
-            act = m_t.addAction(("✓  " if on else "     ") + label)
+            act = m_t.addAction(("✓  " if on else "     ") + i18n.t(label))
             act.triggered.connect(lambda checked, d=dark: set_mode(d))
 
         a_auto = menu.addAction(
-            ("✓  " if autostart.is_enabled() else "     ") + "Автозапуск с Windows")
+            ("✓  " if autostart.is_enabled() else "     ") + i18n.t("autostart"))
         a_auto.triggered.connect(toggle_autostart)
 
-        a_wx = menu.addAction("Обновить погоду")
+        a_wx = menu.addAction(i18n.t("refresh_wx"))
         a_wx.triggered.connect(refresh_weather)
 
-        a_about = menu.addAction("О программе")
+        # --- язык интерфейса (RU/EN, авто по системе) ---
+        m_l = menu.addMenu("Язык / Language")
+        setting = (manager.cfg.get("ui") or {}).get("lang", "auto")
+        for val, name in (("auto", i18n.t("lang_auto")),
+                          ("ru", "Русский"), ("en", "English")):
+            act = m_l.addAction(("✓  " if setting == val else "     ") + name)
+            act.triggered.connect(lambda checked, v=val: set_language(v))
+
+        a_about = menu.addAction(i18n.t("about"))
         a_about.triggered.connect(show_about)
 
         menu.addSeparator()
-        a_quit = menu.addAction("Выход")
+        a_quit = menu.addAction(i18n.t("quit"))
         a_quit.triggered.connect(app.quit)
 
     menu.aboutToShow.connect(rebuild)
@@ -385,8 +404,7 @@ def setup_tray(app: QApplication, manager: WidgetManager) -> None:
         manager.tray = tray
         tray.showMessage(
             f"{config.APP_NAME} {config.APP_VERSION}",
-            "Виджеты запущены. Меню — правый клик по виджету "
-            "или по иконке в трее.",
+            i18n.t("started_msg"),
             QSystemTrayIcon.Information, 5000)
         return True
 
@@ -421,6 +439,8 @@ def build_app(argv=None):
     cfg = config.load()
     t = cfg.get("theme", {})
     theme.apply(t.get("palette"), t.get("dark", True))
+    # язык интерфейса: из настроек или по языку Windows
+    i18n.init((cfg.get("ui") or {}).get("lang", "auto"))
     app.setStyleSheet(app_stylesheet())
 
     # Google Roboto везде: виджеты, меню, диалоги. Если файлы не нашлись
@@ -444,9 +464,7 @@ def build_app(argv=None):
                               for p in stale)
             answer = QMessageBox.question(
                 None, config.APP_NAME,
-                f"Обнаружена запущенная старая копия {config.APP_NAME}:\n"
-                f"{names}\n\n"
-                "Завершить её и запустить текущую версию?",
+                i18n.t("stale_found", name=config.APP_NAME, names=names),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
             if answer == QMessageBox.Yes:
                 terminate_stale(stale)
@@ -457,11 +475,8 @@ def build_app(argv=None):
     if not locked:
         QMessageBox.warning(
             None, config.APP_NAME,
-            f"{config.APP_NAME} уже запущен (иконка в трее).\n\n"
-            "Если иконки не видно — она в скрытой области трея "
-            "(стрелка ^ возле часов).\n"
-            "Либо завершите старую копию через Диспетчер задач "
-            f"({config.APP_NAME}.exe / python.exe).")
+            i18n.t("already_running", name=config.APP_NAME,
+                   exe=f"{config.APP_NAME}.exe"))
         return app, None
 
     manager = WidgetManager(cfg)
