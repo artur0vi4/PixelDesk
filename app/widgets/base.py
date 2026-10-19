@@ -189,8 +189,15 @@ class PixelWidget(QFrame):
         """Подклассы обрабатывают свои пункты меню. True — пункт обработан."""
         return False
 
-    def contextMenuEvent(self, e) -> None:
+    def build_context_menu(self) -> QMenu:
+        """Собирает меню (без показа) — так его можно дополнить в
+        подклассах и проверить тестами."""
         menu = QMenu(self)
+        # Заголовок с версией: мгновенно видно, какая сборка запущена.
+        a_ver = menu.addAction(f"{config.APP_NAME} {config.APP_VERSION}")
+        a_ver.setEnabled(False)
+        menu.addSeparator()
+
         a_top = menu.addAction(self._ck(bool(self.cfg.get("on_top", True)), "Поверх всех окон"))
         a_top.setData("top")
 
@@ -214,7 +221,10 @@ class PixelWidget(QFrame):
         menu.addSeparator()
         a_hide = menu.addAction("Скрыть виджет")
         a_hide.setData("hide")
+        return menu
 
+    def contextMenuEvent(self, e) -> None:
+        menu = self.build_context_menu()
         chosen = menu.exec(e.globalPos())
         if chosen is None:
             return

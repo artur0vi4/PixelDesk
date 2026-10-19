@@ -124,7 +124,7 @@ echo.
 
 echo [3/3] Building exe - this takes 2-5 minutes.
 echo       The window may look frozen, that is normal. Please wait...
-%PYQ% -m PyInstaller --noconfirm --clean --windowed --onefile --name PixelDesk --icon app\resources\app.ico main.py > build_log.txt 2>&1
+%PYQ% -m PyInstaller --noconfirm --clean --windowed --onefile --name PixelDesk --icon app\resources\app.ico --add-data "app\resources;app\resources" main.py > build_log.txt 2>&1
 if errorlevel 1 (
     echo.
     echo ERROR: build failed. Details:

@@ -14,6 +14,9 @@ WEEKDAYS = ("Понедельник", "Вторник", "Среда", "Четв�
 MONTHS_GEN = ("января", "февраля", "марта", "апреля", "мая", "июня",
               "июля", "августа", "сентября", "октября", "ноября", "декабря")
 
+GAP = 0.12          # зазор между строками в долях кегля строки 1
+LINE2_RATIO = 0.50  # кегль приветствия относительно строки 1
+
 
 def greeting(hour: int) -> str:
     if 5 <= hour < 12:
@@ -43,24 +46,44 @@ class DateWidget(PixelWidget):
 
         line1 = f"{WEEKDAYS[now.weekday()]}, {now.day} {MONTHS_GEN[now.month - 1]}"
 
-        # Шрифт занимает максимум места в карточке и растёт при любом
-        # увеличении: и при растягивании мышью, и при смене масштаба.
-        # Ограничители — высота карточки (до 50 %) и ширина строки.
-        h1 = max(10.0, area.height() * 0.50)
-        f1 = self.f(h1, QFont.Bold)
-        while h1 > 9 and (
-                QFontMetrics(f1).horizontalAdvance(line1) > area.width()
-                or QFontMetrics(f1).height() > h1 * 1.24):
-            h1 *= 0.94
-            f1 = self.f(h1, QFont.Bold)
+        # Кегль считается ТОЧНО по измеренным метрикам активного шрифта.
+        # ВАЖНО: метрики можно сравнивать только с фиксированным бюджетом —
+        # размером карточки. Прежняя проверка «height() > кегль * 1.24»
+        # сравнивала метрику с величиной, растущей вместе со шрифтом:
+        # у Segoe UI и Roboto высота строки 1.32–1.33 кегля, условие
+        # не выполнялось никогда, и текст схлопывался до минимума
+        # независимо от растягивания и масштаба.
+        ref = 100.0
+        fm_ref = QFontMetrics(self.f(ref, QFont.Bold))
+        fm_ref2 = QFontMetrics(self.f(ref, QFont.Normal))
+        px_w = fm_ref.horizontalAdvance(line1) / ref          # ширина на 1px
+        r1 = fm_ref.height() / ref                            # высота на 1px
+        r2 = fm_ref2.height() / ref
 
-        self._text(p, QRectF(area.left(), area.top(), area.width(), h1 * 1.24),
+        by_width = area.width() * 0.995 / max(px_w, 0.01)
+        by_height = area.height() / (r1 + GAP + LINE2_RATIO * r2)
+        h1 = max(10.0, min(by_width, by_height))
+
+        # Страховка от округления метрик: бюджет фиксированный (карточка),
+        # поэтому цикл всегда сходится на любом шрифте.
+        f1 = self.f(h1, QFont.Bold)
+        fm1 = QFontMetrics(f1)
+        while h1 > 9 and (
+                fm1.horizontalAdvance(line1) > area.width()
+                or fm1.height() + GAP * h1
+                + QFontMetrics(self.f(h1 * LINE2_RATIO, QFont.Normal)).height()
+                > area.height()):
+            h1 *= 0.96
+            f1 = self.f(h1, QFont.Bold)
+            fm1 = QFontMetrics(f1)
+
+        self._text(p, QRectF(area.left(), area.top(), area.width(), fm1.height()),
                    Qt.AlignLeft | Qt.AlignVCenter, line1,
                    theme.C("on_surface"), f1)
 
-        y2 = area.top() + h1 * 1.30
-        f2 = self.f(max(8.0, h1 * 0.50), QFont.Normal)
+        f2 = self.f(max(8.0, h1 * LINE2_RATIO), QFont.Normal)
+        y2 = area.top() + fm1.height() + GAP * h1
         self._text(p, QRectF(area.left(), y2, area.width(),
                              max(10.0, area.bottom() - y2 + 1)),
-                   Qt.AlignLeft | Qt.AlignVCenter, greeting(now.hour),
+                   Qt.AlignLeft | Qt.AlignTop, greeting(now.hour),
                    theme.C("on_surface_variant"), f2)

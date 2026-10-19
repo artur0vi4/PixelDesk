@@ -1,4 +1,10 @@
-"""Виджет «Календарь» — месяц с навигацией, подсветкой сегодняшнего дня."""
+"""Виджет «Календарь» — месяц с навигацией, выходными и праздниками РФ.
+
+Выходные (суббота/воскресенье) — красная подложка; российские
+нерабочие праздничные дни — жирным красным с точкой-маркером.
+Переносы выходных по ежегодным постановлениям правительства не
+учитываются — только фиксированный список праздников.
+"""
 from __future__ import annotations
 
 import calendar as calendar_mod
@@ -13,6 +19,23 @@ from .. import theme
 WD_SHORT = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
 MONTHS_NOM = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
               "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
+
+# Нерабочие праздничные дни РФ (ТК РФ ст. 112), (месяц, день).
+# 1–8 января включают Рождество 7 января.
+RU_HOLIDAYS: set = {
+    (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8),
+    (2, 23),   # День защитника Отечества
+    (3, 8),    # Международный женский день
+    (5, 1),    # Праздник Весны и Труда
+    (5, 9),    # День Победы
+    (6, 12),   # День России
+    (11, 4),   # День народного единства
+}
+
+
+def is_ru_holiday(d: date) -> bool:
+    """Нерабочий праздничный день РФ (фиксированный список)."""
+    return (d.month, d.day) in RU_HOLIDAYS
 
 
 def _add_months(d: date, n: int) -> date:
@@ -113,6 +136,8 @@ class CalendarWidget(PixelWidget):
                               gy + row * row_h, cell_w, row_h)
                 if 1 <= dnum <= days_in:
                     d = date(self._month.year, self._month.month, dnum)
+                    holiday = is_ru_holiday(d)
+                    weekend = col >= 5
                     if d == today:
                         r = min(cell.width(), cell.height()) * 0.38
                         c = cell.center()
@@ -122,13 +147,31 @@ class CalendarWidget(PixelWidget):
                         p.setFont(f_day_b)
                         p.setPen(QColor(theme.C("on_primary")))
                     else:
-                        p.setBrush(Qt.NoBrush)
-                        p.setFont(f_day)
-                        if col >= 5:
+                        cc = cell.center()
+                        if weekend:
+                            # мягкая красная подложка под выходным
+                            p.setPen(Qt.NoPen)
+                            wc = QColor(theme.C("error"))
+                            wc.setAlpha(38)
+                            p.setBrush(wc)
+                            rr = min(cell.width(), cell.height()) * 0.40
+                            p.drawEllipse(QPointF(cc.x(), cc.y()), rr, rr)
+                        else:
+                            p.setBrush(Qt.NoBrush)
+                        p.setFont(f_day_b if holiday else f_day)
+                        if holiday or weekend:
                             p.setPen(QColor(theme.C("error")))
                         else:
                             p.setPen(QColor(theme.C("on_surface")))
                     p.drawText(cell, int(Qt.AlignCenter), str(dnum))
+                    if d != today and holiday:
+                        # точка-маркер праздника под числом
+                        cc = cell.center()
+                        p.setPen(Qt.NoPen)
+                        p.setBrush(QColor(theme.C("error")))
+                        dot_y = cc.y() + min(cell.width(), cell.height()) * 0.30
+                        p.drawEllipse(QPointF(cc.x(), dot_y),
+                                      1.7 * self.s, 1.7 * self.s)
                 else:
                     n = days_prev + dnum if dnum < 1 else dnum - days_in
                     p.setFont(f_day)

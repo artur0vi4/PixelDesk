@@ -12,13 +12,15 @@ import os
 import sys
 import traceback
 
-from PySide6.QtCore import QLockFile, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPen
+from PySide6.QtCore import QLockFile, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPen
 from PySide6.QtWidgets import (QApplication, QMenu, QMessageBox,
                                QSystemTrayIcon)
 
 from app import autostart, config, theme
 from app.sysinfo import SystemMonitor
+from app.widgets import base as widgets_base
+from app.widgets.analog import AnalogClockWidget
 from app.widgets.base import PixelWidget
 from app.widgets.calendar import CalendarWidget
 from app.widgets.clock import ClockWidget
@@ -26,15 +28,17 @@ from app.widgets.glance import DateWidget
 from app.widgets.sysmon import SystemWidget
 from app.widgets.weather import WeatherWidget
 
-WIDGET_ORDER = ("clock", "date", "calendar", "weather", "system")
+WIDGET_ORDER = ("clock", "clock_analog", "date", "calendar", "weather", "system")
 WIDGET_CLASSES = {
     "clock": ClockWidget,
+    "clock_analog": AnalogClockWidget,
     "date": DateWidget,
     "calendar": CalendarWidget,
     "weather": WeatherWidget,
 }
 WIDGET_TITLES = {
     "clock": "Часы",
+    "clock_analog": "Аналоговые часы",
     "date": "Дата и день недели",
     "calendar": "Календарь",
     "weather": "Погода",
@@ -67,6 +71,28 @@ def make_app_icon() -> QIcon:
     p.drawLine(128, 128, 156, 140)    # часовая
     p.end()
     return QIcon(pm)
+
+
+def load_app_fonts() -> str | None:
+    """Регистрирует встроенный Google Roboto (Apache 2.0) из
+    app/resources/fonts. Работает и из исходников, и внутри
+    PyInstaller-onefile (ресурсы распаковываются в _MEIPASS).
+    Возвращает имя семейства, если оно доступно."""
+    try:
+        from PySide6.QtGui import QFontDatabase
+        base_dir = getattr(sys, "_MEIPASS", None) \
+            or os.path.dirname(os.path.abspath(__file__))
+        fdir = os.path.join(base_dir, "app", "resources", "fonts")
+        if os.path.isdir(fdir):
+            for fn in sorted(os.listdir(fdir)):
+                if fn.lower().endswith(".ttf"):
+                    QFontDatabase.addApplicationFont(os.path.join(fdir, fn))
+        if "Roboto" in QFontDatabase.families():
+            return "Roboto"
+    except Exception:
+        config.log_error("Не удалось загрузить встроенные шрифты\n"
+                         + traceback.format_exc())
+    return None
 
 
 def app_stylesheet() -> str:
@@ -109,6 +135,10 @@ class WidgetManager:
         self.cfg = cfg
         self.monitor = SystemMonitor()
         self.widgets: dict[str, PixelWidget] = {}
+        # Ссылки на трей обязаны жить всё время работы приложения,
+        # иначе Python удалит эти объекты и иконка исчезнет.
+        self.tray = None
+        self.tray_timer = None
 
     # ------------------------------------------------------------------ #
     def _ensure_position(self, key: str) -> None:
@@ -184,6 +214,59 @@ class WidgetManager:
                 pass
         self.monitor.stop()
         config.save(self.cfg)
+
+
+# ---------------------------------------------------------------------- #
+#  Старые копии программы (мешают запуску новой версии)
+# ---------------------------------------------------------------------- #
+STALE_EXE_NAMES = ("pixeldesk.exe", "pixelwidgets.exe")
+STALE_PY_MARKERS = ("pixeldesk", "pixelwidgets")
+
+
+def find_stale_instances() -> list:
+    """Живые процессы ДРУГИХ копий PixelDesk / PixelWidgets.
+
+    Свой PID и PID родителя исключаем: у onefile-EXE родитель —
+    это загрузчик PyInstaller, он не держит блокировку.
+    """
+    try:
+        import psutil
+    except Exception:
+        return []
+    me, my_parent = os.getpid(), os.getppid()
+    found = []
+    for p in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            info = p.info
+            if info["pid"] in (me, my_parent):
+                continue
+            name = (info["name"] or "").lower()
+            cmd = " ".join(info["cmdline"] or []).lower()
+            is_our_exe = name in STALE_EXE_NAMES
+            is_our_py = (name.startswith(("python", "pyw", "py."))
+                         and "main.py" in cmd
+                         and any(m in cmd for m in STALE_PY_MARKERS))
+            if is_our_exe or is_our_py:
+                found.append(p)
+        except Exception:
+            continue
+    return found
+
+
+def terminate_stale(procs: list) -> None:
+    """Аккуратно завершает найденные копии: terminate, затем kill."""
+    import psutil
+    for p in procs:
+        try:
+            p.terminate()
+        except Exception:
+            pass
+    _, alive = psutil.wait_procs(procs, timeout=3)
+    for p in alive:
+        try:
+            p.kill()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------- #
@@ -271,12 +354,57 @@ def build_tray(app: QApplication, manager: WidgetManager) -> QSystemTrayIcon:
 
     menu.aboutToShow.connect(rebuild)
     tray.setContextMenu(menu)
+    tray.menu_ref = menu   # держим ссылку на меню, иначе Python его удалит
     tray.setToolTip(f"{config.APP_NAME} {config.APP_VERSION}")
     tray.activated.connect(
         lambda reason: manager.set_all_hidden(not manager.cfg.get("hidden_all"))
         if reason == QSystemTrayIcon.Trigger else None)
     tray.show()
     return tray
+
+
+def setup_tray(app: QApplication, manager: WidgetManager) -> None:
+    """Создаёт иконку трея и СОХРАНЯЕТ ссылку на неё в manager (иначе
+    Python удаляет объект — иконка мгновенно исчезает, а меню умирает
+    вместе с ней). Если системный трей ещё не готов (например, автозапуск
+    сработал раньше Проводника) — повторяет попытки по таймеру до минуты.
+    При успехе показывает уведомление — видимое подтверждение запуска.
+    """
+    state = {"tray": None, "tries": 0}
+
+    def create() -> bool:
+        """True — повторять больше не нужно (создан или создан не будет)."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return False
+        try:
+            tray = build_tray(app, manager)
+        except Exception:
+            config.log_error("Трей недоступен\n" + traceback.format_exc())
+            return True
+        state["tray"] = tray
+        manager.tray = tray
+        tray.showMessage(
+            f"{config.APP_NAME} {config.APP_VERSION}",
+            "Виджеты запущены. Меню — правый клик по виджету "
+            "или по иконке в трее.",
+            QSystemTrayIcon.Information, 5000)
+        return True
+
+    def retry() -> None:
+        state["tries"] += 1
+        if create() or state["tries"] >= 40:
+            if state["tray"] is None:
+                config.log_error(
+                    "Системный трей так и не стал доступен за 60 секунд.")
+            timer.stop()
+
+    if create():
+        return
+    timer = QTimer(app)
+    timer.setInterval(1500)
+    timer.timeout.connect(retry)
+    timer.start()
+    manager.tray_timer = timer   # держим ссылку, иначе таймер умрёт
 
 
 # ---------------------------------------------------------------------- #
@@ -295,21 +423,50 @@ def build_app(argv=None):
     theme.apply(t.get("palette"), t.get("dark", True))
     app.setStyleSheet(app_stylesheet())
 
+    # Google Roboto везде: виджеты, меню, диалоги. Если файлы не нашлись
+    # (например, ресурсы не попали в сборку) — системный шрифт по умолчанию.
+    fam = load_app_fonts()
+    if fam:
+        widgets_base.FONT_FAMILY = fam
+        app.setFont(QFont(fam))
+
     os.makedirs(config.CONFIG_DIR, exist_ok=True)
     lock = QLockFile(os.path.join(config.CONFIG_DIR, "app.lock"))
     lock.setStaleLockTime(0)
-    if not lock.tryLock(100):
-        QMessageBox.warning(None, config.APP_NAME,
-                            f"{config.APP_NAME} уже запущен (иконка в трее).")
+
+    locked = lock.tryLock(200)
+    if not locked:
+        # Блокировка занята: либо живёт другая копия, либо остался
+        # устаревший lock-файл после сбоя.
+        stale = find_stale_instances()
+        if stale:
+            names = ", ".join(f"{p.info['name']} (PID {p.info['pid']})"
+                              for p in stale)
+            answer = QMessageBox.question(
+                None, config.APP_NAME,
+                f"Обнаружена запущенная старая копия {config.APP_NAME}:\n"
+                f"{names}\n\n"
+                "Завершить её и запустить текущую версию?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if answer == QMessageBox.Yes:
+                terminate_stale(stale)
+                locked = lock.tryLock(500)
+        else:
+            lock.removeStaleLockFile()
+            locked = lock.tryLock(200)
+    if not locked:
+        QMessageBox.warning(
+            None, config.APP_NAME,
+            f"{config.APP_NAME} уже запущен (иконка в трее).\n\n"
+            "Если иконки не видно — она в скрытой области трея "
+            "(стрелка ^ возле часов).\n"
+            "Либо завершите старую копию через Диспетчер задач "
+            f"({config.APP_NAME}.exe / python.exe).")
         return app, None
 
     manager = WidgetManager(cfg)
     manager.build_all()
-    try:
-        tray = build_tray(app, manager)
-    except Exception:
-        tray = None
-        config.log_error("Трей недоступен\n" + traceback.format_exc())
+    setup_tray(app, manager)
 
     def on_quit() -> None:
         manager.shutdown()

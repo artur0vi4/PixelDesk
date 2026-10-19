@@ -12,7 +12,7 @@ import os
 import shutil
 
 APP_NAME = "PixelDesk"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.4"
 APP_AUTHOR = "Artur (artur0vi4)"
 APP_URL = "https://github.com/artur0vi4/PixelDesk"
 
@@ -44,6 +44,8 @@ DEFAULTS: dict = {
     "widgets": {
         "clock":    {"enabled": True, "x": None, "y": None, "w": 330, "h": 150,
                      "scale": 1.0, "on_top": True, "opacity": 0.96},
+        "clock_analog": {"enabled": True, "x": None, "y": None, "w": 200, "h": 200,
+                         "scale": 1.0, "on_top": True, "opacity": 0.96},
         "date":     {"enabled": True, "x": None, "y": None, "w": 340, "h": 112,
                      "scale": 1.0, "on_top": True, "opacity": 0.96},
         "calendar": {"enabled": True, "x": None, "y": None, "w": 330, "h": 386,

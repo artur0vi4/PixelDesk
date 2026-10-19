@@ -26,10 +26,12 @@ class ClockWidget(PixelWidget):
         text = f"{now.hour:02d}:{now.minute:02d}"
         area = QRectF(self.rect()).adjusted(
             self.pad() * 0.9, self.pad() * 0.6, -self.pad() * 0.9, -self.pad() * 0.6)
-        size = area.height() * 0.90
+        # реальное отношение высоты строки к кеглю у активного шрифта
+        # (Segoe UI/Roboto ~1.32-1.33, DejaVu 1.17 — различие заметное)
+        ratio = QFontMetrics(self.f(100.0, QFont.Black)).height() / 100.0
+        size = area.height() * 0.90 / max(1.0, ratio)
         font = self.f(size, QFont.Black)
-        # уменьшаем, пока строка не влезет И по ширине, И по высоте
-        # (метрики шрифта выше pixelSize — иначе низ/верх обрезаются)
+        # страховка: бюджет фиксированный (карточка) — цикл сходится
         while size > 10 and (
                 QFontMetrics(font).horizontalAdvance(text) > area.width()
                 or QFontMetrics(font).height() > area.height()):
