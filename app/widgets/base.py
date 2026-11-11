@@ -16,7 +16,7 @@ from PySide6.QtCore import QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import QApplication, QFrame, QMenu
 
-from .. import config, theme
+from .. import config, layout, theme
 from .. import i18n
 
 FONT_FAMILY = "Segoe UI" if os.name == "nt" else None
@@ -85,6 +85,7 @@ class PixelWidget(QFrame):
         self.cfg["scale"] = round(new_s, 3)
         self.resize(max(self.minimumWidth(), int(self.width() * factor)),
                     max(self.minimumHeight(), int(self.height() * factor)))
+        self.ensure_on_screen()   # выросла за край экрана — возвращаем обратно
         self.update()
         self.persist()
 
@@ -94,6 +95,50 @@ class PixelWidget(QFrame):
         self.cfg["w"] = self.width()
         self.cfg["h"] = self.height()
         config.save(self.app_cfg)
+
+    # ------------------------------------------------------------------ #
+    #  Карточка не должна теряться за краем экрана
+    # ------------------------------------------------------------------ #
+    def rect_tuple(self) -> tuple:
+        """(x, y, w, h) без Qt-типов — для app.layout."""
+        return (self.x(), self.y(), self.width(), self.height())
+
+    @staticmethod
+    def screen_areas() -> list:
+        """Доступные области всех мониторов — (x, y, w, h)."""
+        areas = []
+        for scr in QApplication.screens():
+            g = scr.availableGeometry()
+            areas.append((g.x(), g.y(), g.width(), g.height()))
+        return areas
+
+    def can_be_reached(self) -> bool:
+        """True, если карточку видно настолько, что за неё можно взяться."""
+        try:
+            return any(layout.is_reachable(self.rect_tuple(), a)
+                       for a in self.screen_areas())
+        except Exception:
+            return True
+
+    def ensure_on_screen(self) -> bool:
+        """Возвращает карточку на экран, если её увели за край.
+
+        Срабатывает после перетаскивания и изменения размера: утащить
+        виджет за пределы монитора мышь не запрещает, а найти его потом
+        невозможно (именно так «улетал» календарь). True — карточку сдвинули.
+        """
+        try:
+            primary = QApplication.primaryScreen().availableGeometry()
+            fallback = (primary.x(), primary.y(),
+                        primary.width(), primary.height())
+            nx, ny, _, _ = layout.ensure_reachable(
+                self.rect_tuple(), self.screen_areas(), fallback)
+        except Exception:
+            return False
+        if (nx, ny) != (self.x(), self.y()):
+            self.move(int(nx), int(ny))
+            return True
+        return False
 
     def set_on_top(self, on: bool) -> None:
         self.cfg["on_top"] = bool(on)
@@ -159,6 +204,7 @@ class PixelWidget(QFrame):
 
     def mouseReleaseEvent(self, e) -> None:
         if self._moved:
+            self.ensure_on_screen()
             self.persist()
         self._drag_offset = None
         self._resize_mode = False
@@ -218,6 +264,12 @@ class PixelWidget(QFrame):
             act = m_sc.addAction(self._ck(on, f"{pct}%"))
             act.setData(("sc", pct))
 
+        # Пункт появляется только если карточка почти улетела за экран —
+        # тогда его видно и можно нажать на оставшийся край.
+        if not self.can_be_reached():
+            a_back = menu.addAction(i18n.t("menu_bring_back"))
+            a_back.setData("bring_back")
+
         if self.HAS_REFRESH:
             a_ref = menu.addAction(i18n.t("refresh"))
             a_ref.setData("refresh")
@@ -240,6 +292,9 @@ class PixelWidget(QFrame):
             self.refresh()
         elif data == "hide":
             self.hide_me()
+        elif data == "bring_back":
+            self.ensure_on_screen()
+            self.persist()
         elif isinstance(data, tuple):
             kind, val = data
             if kind == "op":

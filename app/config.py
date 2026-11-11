@@ -12,7 +12,7 @@ import os
 import shutil
 
 APP_NAME = "PixelDesk"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 APP_AUTHOR = "Artur (artur0vi4)"
 APP_URL = "https://github.com/artur0vi4/PixelDesk"
 
@@ -60,6 +60,10 @@ DEFAULTS: dict = {
     "ui": {"lang": "auto"},   # 'auto' | 'ru' | 'en'
     "autostart": False,
     "hidden_all": False,
+    # Профили расстановки: {"Работа": {"clock": {"x":.., "y":.., ...}, ...}}
+    "layouts": {},
+    # Снимок расстановки до последнего применения профиля («Вернуть как было»)
+    "layout_undo": None,
 }
 
 

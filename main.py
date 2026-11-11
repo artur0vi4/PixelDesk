@@ -14,10 +14,10 @@ import traceback
 
 from PySide6.QtCore import QLockFile, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QPen
-from PySide6.QtWidgets import (QApplication, QMenu, QMessageBox,
+from PySide6.QtWidgets import (QApplication, QInputDialog, QMenu, QMessageBox,
                                QSystemTrayIcon)
 
-from app import autostart, config, i18n, theme
+from app import autostart, config, i18n, layout, theme
 from app.sysinfo import SystemMonitor
 from app.widgets import base as widgets_base
 from app.widgets.analog import AnalogClockWidget
@@ -141,14 +141,75 @@ class WidgetManager:
         self.tray_timer = None
 
     # ------------------------------------------------------------------ #
-    def _ensure_position(self, key: str) -> None:
+    #  Экраны и координаты
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _area() -> tuple:
+        """Доступная область основного экрана — (x, y, w, h)."""
+        scr = QApplication.primaryScreen()
+        if scr is None:
+            return (0, 0, 1920, 1080)
+        g = scr.availableGeometry()
+        return (g.x(), g.y(), g.width(), g.height())
+
+    @staticmethod
+    def _areas() -> list:
+        """Доступные области всех мониторов."""
+        out = []
+        for scr in QApplication.screens():
+            g = scr.availableGeometry()
+            out.append((g.x(), g.y(), g.width(), g.height()))
+        return out or [(0, 0, 1920, 1080)]
+
+    def _rect_from_cfg(self, key: str) -> tuple | None:
+        """Прямоугольник карточки из настроек; None — координат ещё нет."""
         wc = self.cfg["widgets"][key]
-        if wc.get("x") is not None and wc.get("y") is not None:
-            return
-        scr = QApplication.primaryScreen().availableGeometry()
-        idx = WIDGET_ORDER.index(key)
-        wc["x"] = max(scr.left() + 8, scr.right() - wc["w"] - 56 - idx * 26)
-        wc["y"] = max(scr.top() + 8, scr.top() + 34 + idx * 34)
+        if wc.get("x") is None or wc.get("y") is None:
+            return None
+        return (int(wc["x"]), int(wc["y"]), int(wc["w"]), int(wc["h"]))
+
+    # ------------------------------------------------------------------ #
+    #  Позиции: значения по умолчанию и страховка от потери
+    # ------------------------------------------------------------------ #
+    def ensure_positions(self) -> None:
+        """Гарантирует, что у каждой карточки есть позиция и её видно.
+
+        1. Виджетам без координат выдаётся место: при первом запуске (или
+           после сброса) — колонками у правого края, одиночному — свободное.
+        2. Карточку, улетевшую за пределы всех мониторов (утащили мышью или
+           отключили второй экран), возвращает на основной экран.
+        """
+        items = self.cfg["widgets"]
+        area = self._area()
+        missing = [k for k in WIDGET_ORDER
+                   if items[k].get("x") is None or items[k].get("y") is None]
+        if missing:
+            if len(missing) == len(WIDGET_ORDER):
+                # Первый запуск / сброс — цельная раскладка, а не каша.
+                enabled = [k for k in WIDGET_ORDER if items[k].get("enabled", True)]
+                sizes = {k: (int(items[k]["w"]), int(items[k]["h"])) for k in enabled}
+                for k, (x, y) in layout.default_positions(enabled, sizes, area).items():
+                    items[k]["x"], items[k]["y"] = int(x), int(y)
+            else:
+                # Включили один виджет — ставим его на свободное место.
+                occupied = [r for r in (self._rect_from_cfg(k) for k in WIDGET_ORDER)
+                            if r is not None]
+                for k in missing:
+                    w, h = int(items[k]["w"]), int(items[k]["h"])
+                    x, y = layout.find_free_spot(w, h, occupied, area)
+                    items[k]["x"], items[k]["y"] = int(x), int(y)
+                    occupied.append((int(x), int(y), w, h))
+
+        areas = self._areas()
+        for k in WIDGET_ORDER:
+            rect = self._rect_from_cfg(k)
+            if rect is None:
+                continue
+            nx, ny, _, _ = layout.ensure_reachable(rect, areas, area)
+            if (nx, ny) != (rect[0], rect[1]):
+                items[k]["x"], items[k]["y"] = int(nx), int(ny)
+                config.log_error(f"Виджет {k} возвращён на экран: "
+                                 f"{rect[0]},{rect[1]} -> {nx},{ny}")
 
     def create_widget(self, key: str) -> PixelWidget:
         if key in self.widgets:
@@ -169,13 +230,138 @@ class WidgetManager:
         config.save(self.cfg)
 
     def build_all(self) -> None:
-        for k in WIDGET_ORDER:
-            self._ensure_position(k)
+        self.ensure_positions()
         for k in WIDGET_ORDER:
             if self.cfg["widgets"][k].get("enabled", True):
                 self.create_widget(k)
         config.save(self.cfg)
         self.monitor.start()
+
+    # ------------------------------------------------------------------ #
+    #  Расстановка: профили, выравнивание, сброс
+    # ------------------------------------------------------------------ #
+    def capture_layout(self) -> dict:
+        """Снимок текущей расстановки: позиции, размеры, масштаб, вкл/выкл."""
+        for key, w in self.widgets.items():
+            wc = self.cfg["widgets"].get(key)
+            if wc is None:
+                continue
+            wc["x"], wc["y"] = w.x(), w.y()
+            wc["w"], wc["h"] = w.width(), w.height()
+        return {"widgets": layout.capture(self.cfg["widgets"]),
+                "saved": layout.stamp()}
+
+    def _push_undo(self) -> None:
+        """Запоминает расстановку до изменения — для «Вернуть как было»."""
+        self.cfg["layout_undo"] = self.capture_layout()
+
+    def apply_geometry(self) -> None:
+        """Переносит геометрию из настроек в живые окна.
+
+        Заодно приводит состав виджетов к настройкам: недостающие создаёт,
+        выключенные закрывает.
+        """
+        for key in WIDGET_ORDER:
+            wc = self.cfg["widgets"][key]
+            enabled = bool(wc.get("enabled", True))
+            widget = self.widgets.get(key)
+            if not enabled:
+                if widget is not None:
+                    self.widgets.pop(key, None)
+                    widget.blockSignals(True)
+                    widget.close()
+                    widget.blockSignals(False)
+                continue
+            if widget is None or wc.get("x") is None or wc.get("y") is None:
+                self.create_widget(key)
+                continue
+            widget.resize(int(wc["w"]), int(wc["h"]))
+            widget.move(int(wc["x"]), int(wc["y"]))
+            widget.update()
+            if not self.cfg.get("hidden_all") and not widget.isVisible():
+                widget.show()
+        config.save(self.cfg)
+
+    def apply_layout_snapshot(self, snapshot: dict) -> None:
+        """Возвращает расстановку из снимка (профиль или «как было»)."""
+        if not isinstance(snapshot, dict):
+            return
+        layout.restore(self.cfg["widgets"], snapshot.get("widgets") or {})
+        self.ensure_positions()   # снимок мог быть сделан на другом мониторе
+        self.apply_geometry()
+
+    def save_layout(self, name: str) -> str | None:
+        """Сохраняет текущую расстановку под именем. Возвращает имя."""
+        name = layout.clean_name(name)
+        if not name:
+            return None
+        if not isinstance(self.cfg.get("layouts"), dict):
+            self.cfg["layouts"] = {}   # config.json мог быть испорчен вручную
+        self.cfg["layouts"][name] = self.capture_layout()
+        config.save(self.cfg)
+        return name
+
+    def apply_named_layout(self, name: str) -> bool:
+        """Применяет сохранённый профиль. True — профиль найден."""
+        layouts = self.cfg.get("layouts")
+        snapshot = layouts.get(name) if isinstance(layouts, dict) else None
+        if not snapshot:
+            return False
+        self._push_undo()
+        self.apply_layout_snapshot(snapshot)
+        return True
+
+    def delete_layout(self, name: str) -> bool:
+        """Удаляет профиль расстановки."""
+        layouts = self.cfg.get("layouts")
+        if not isinstance(layouts, dict) or name not in layouts:
+            return False
+        layouts.pop(name, None)
+        config.save(self.cfg)
+        return True
+
+    def undo_layout(self) -> bool:
+        """Возвращает расстановку, которая была до последнего изменения."""
+        snapshot = self.cfg.get("layout_undo")
+        if not isinstance(snapshot, dict) or not snapshot:
+            return False
+        self.cfg["layout_undo"] = None   # действие одноразовое
+        self.apply_layout_snapshot(snapshot)
+        return True
+
+    def arrange_default(self) -> None:
+        """Выравнивает включённые карточки колонками у правого края экрана.
+
+        Размеры и масштаб не меняются — это «верни всё на место», а не
+        «сбрось мои настройки».
+        """
+        self._push_undo()
+        items = self.cfg["widgets"]
+        area = self._area()
+        enabled = [k for k in WIDGET_ORDER if items[k].get("enabled", True)]
+        sizes = {k: (int(items[k]["w"]), int(items[k]["h"])) for k in enabled}
+        for k, (x, y) in layout.default_positions(enabled, sizes, area).items():
+            items[k]["x"], items[k]["y"] = int(x), int(y)
+        self.ensure_positions()   # экран меньше раскладки — подтянуть крайние
+        self.apply_geometry()
+
+    def reset_layout(self) -> None:
+        """Сбрасывает расстановку к заводской: размеры, масштаб, позиции.
+
+        Все виджеты снова включаются и возвращаются на экран — тот самый
+        «вытащить календарь из-за края» одним пунктом меню.
+        """
+        self._push_undo()
+        self.cfg["hidden_all"] = False
+        for key in WIDGET_ORDER:
+            defaults = config.DEFAULTS["widgets"][key]
+            wc = self.cfg["widgets"][key]
+            wc["w"], wc["h"] = defaults["w"], defaults["h"]
+            wc["scale"] = defaults["scale"]
+            wc["enabled"] = True
+            wc["x"] = wc["y"] = None
+        self.ensure_positions()
+        self.apply_geometry()
 
     def set_all_hidden(self, hidden: bool) -> None:
         self.cfg["hidden_all"] = bool(hidden)
@@ -189,7 +375,7 @@ class WidgetManager:
     def enable_widget(self, key: str, on: bool) -> None:
         self.cfg["widgets"][key]["enabled"] = bool(on)
         if on:
-            self._ensure_position(key)
+            self.ensure_positions()
             self.create_widget(key)
         else:
             w = self.widgets.pop(key, None)
@@ -320,6 +506,59 @@ def build_tray(app: QApplication, manager: WidgetManager) -> QSystemTrayIcon:
         if wx is not None:
             wx.refresh()   # подписи дней «запечены» в данных
 
+    def notify(text: str) -> None:
+        """Короткое сообщение в трее — подтверждение действия."""
+        if manager.tray is not None:
+            manager.tray.showMessage(config.APP_NAME, text,
+                                     QSystemTrayIcon.Information, 3000)
+
+    # --- расстановка: сохранение/применение профилей, сброс ---
+    def ask_yes(title: str, text: str) -> bool:
+        return QMessageBox.question(
+            None, title, text,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
+
+    def save_layout() -> None:
+        layouts = manager.cfg.get("layouts")
+        names = list(layouts) if isinstance(layouts, dict) else []
+        name, ok = QInputDialog.getText(
+            None, i18n.t("lay_save_title"), i18n.t("lay_name_prompt"),
+            text=names[-1] if names else i18n.t("lay_default_name"))
+        if not ok:
+            return
+        name = layout.clean_name(name)
+        if not name:
+            return
+        if name in names and not ask_yes(config.APP_NAME,
+                                         i18n.t("lay_exists", name=name)):
+            return
+        manager.save_layout(name)
+        notify(i18n.t("lay_saved", name=name))
+
+    def apply_preset(name: str) -> None:
+        if manager.apply_named_layout(name):
+            notify(i18n.t("lay_applied", name=name))
+
+    def delete_preset(name: str) -> None:
+        if not ask_yes(config.APP_NAME, i18n.t("lay_delete_confirm", name=name)):
+            return
+        if manager.delete_layout(name):
+            notify(i18n.t("lay_deleted", name=name))
+
+    def undo_layout() -> None:
+        if manager.undo_layout():
+            notify(i18n.t("lay_undo_done"))
+
+    def arrange() -> None:
+        manager.arrange_default()
+        notify(i18n.t("lay_arranged"))
+
+    def reset_layout() -> None:
+        if not ask_yes(i18n.t("lay_reset_title"), i18n.t("lay_reset_confirm")):
+            return
+        manager.reset_layout()
+        notify(i18n.t("lay_reset_done"))
+
     def rebuild() -> None:
         menu.clear()
         hidden = bool(manager.cfg.get("hidden_all"))
@@ -335,6 +574,34 @@ def build_tray(app: QApplication, manager: WidgetManager) -> QSystemTrayIcon:
                                 + i18n.t(WIDGET_TITLES[k]))
             act.triggered.connect(
                 lambda checked, key=k: manager.enable_widget(key, key not in manager.widgets))
+
+        # --- расстановка: профили, выравнивание, сброс ---
+        presets = manager.cfg.get("layouts")
+        presets = list(presets) if isinstance(presets, dict) else []
+        m_lay = menu.addMenu(i18n.t("m_layout"))
+        a_save = m_lay.addAction(i18n.t("lay_save"))
+        a_save.triggered.connect(save_layout)
+        if presets:
+            m_lay.addSeparator()
+            for name in presets:
+                act = m_lay.addAction(name)
+                act.triggered.connect(
+                    lambda checked=False, n=name: apply_preset(n))
+        m_lay.addSeparator()
+        a_undo = m_lay.addAction(i18n.t("lay_undo"))
+        a_undo.setEnabled(isinstance(manager.cfg.get("layout_undo"), dict))
+        a_undo.triggered.connect(undo_layout)
+        a_arr = m_lay.addAction(i18n.t("lay_arrange"))
+        a_arr.triggered.connect(arrange)
+        a_rst = m_lay.addAction(i18n.t("lay_reset"))
+        a_rst.triggered.connect(reset_layout)
+        if presets:
+            m_lay.addSeparator()
+            m_del = m_lay.addMenu(i18n.t("lay_delete"))
+            for name in presets:
+                act = m_del.addAction(name)
+                act.triggered.connect(
+                    lambda checked=False, n=name: delete_preset(n))
 
         menu.addSeparator()
         m_t = menu.addMenu(i18n.t("m_theme"))
